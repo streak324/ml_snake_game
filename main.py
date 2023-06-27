@@ -1,11 +1,13 @@
 import arcade
+import arcade.gui
 import numpy
+import random
 
 INITIAL_SCREEN_WIDTH = 1280
 INITIAL_SCREEN_HEIGHT = 720
 SCREEN_TITLE = "Snake"
 PIXELS_PER_BOARD_TILE = 32
-BOARD_WIDTH = 16
+BOARD_WIDTH = 24
 BOARD_HEIGHT = 16
 INITIAL_SNAKE_LENGTH = 3
 
@@ -20,18 +22,44 @@ class SnakeGame:
 
 	OPPOSITE_MOVE_DIRS = (MOVE_DOWN, MOVE_RIGHT, MOVE_LEFT, MOVE_UP)
 
+	TILE_EMPTY = 0
 	TILE_SNAKE = 1
 	TILE_FOOD = 2
 
 	def __init__(self, board_width: int, board_height: int):
 		self.snake_tentative_move_dir = SnakeGame.MOVE_LEFT
 		self.snake_move_dir = SnakeGame.MOVE_LEFT
-		self.board = numpy.zeros([board_width, board_height], dtype=numpy.int8)
+		self.board_width = board_width
+		self.board_height = board_height
+		self.board = numpy.zeros([board_height, board_width], dtype=numpy.int8)
 		self.snake = []
+		self.is_game_over = False
 		for i in range(INITIAL_SNAKE_LENGTH):
 			self.snake.append((int(board_width - INITIAL_SNAKE_LENGTH - 1 + i), int(board_height/2)))
 			self.board[self.snake[i][1]][self.snake[i][0]] = SnakeGame.TILE_SNAKE
+		self.spawn_food()
+
+	def spawn_food(self):
+		best_score = -1
+		found = False
+		pos = (0,0)
+		for i in range(self.board_height):
+			for j in range(self.board_width):
+				if (j+1 < self.board_width and self.board[i][j+1] == SnakeGame.TILE_SNAKE) or (j-1 < self.board_width and self.board[i][j-1] == SnakeGame.TILE_SNAKE) or (i+1 < self.board_height and self.board[i+1][j] == SnakeGame.TILE_SNAKE) or (i-1 < self.board_height and self.board[i-1][j] == SnakeGame.TILE_SNAKE):
+					continue
+				if self.board[i][j] == SnakeGame.TILE_EMPTY:
+					score = random.random()
+					if score > best_score:
+						found = True
+						pos = (j, i)
+						best_score = score
+		if found:
+			self.board[pos[1]][pos[0]] = SnakeGame.TILE_FOOD
+
+
 	def step(self):
+		if self.is_game_over:
+			return
 		if SnakeGame.OPPOSITE_MOVE_DIRS[self.snake_tentative_move_dir] != self.snake_move_dir:
 			self.snake_move_dir = self.snake_tentative_move_dir
 		dx = 0
@@ -46,21 +74,25 @@ class SnakeGame:
 			dx = 1
 		new_pos = (self.snake[0][0]+dx, self.snake[0][1]+dy)
 
-		if new_pos[0] >= len(self.board[0]) or new_pos[0] < 0 or new_pos[1] >= len(self.board[1]) or new_pos[1] < 0:
-			# TODO: implement game over
+		if new_pos[0] >= self.board_width or new_pos[0] < 0 or new_pos[1] >= self.board_height or new_pos[1] < 0:
 			print("out of bounds")
+			self.is_game_over = True
 			return
 		if self.board[new_pos[1]][new_pos[0]] == SnakeGame.TILE_SNAKE:
-			# TODO: implement game over
 			print("snake hit self")
+			self.is_game_over = True
 			return
 		
-		self.board[new_pos[1]][new_pos[0]] = SnakeGame.TILE_SNAKE
+		prev_tile = self.board[new_pos[1]][new_pos[0]]
 		snake_tail = self.snake[len(self.snake)-1]
+		self.board[new_pos[1]][new_pos[0]] = SnakeGame.TILE_SNAKE
 		self.board[snake_tail[1]][snake_tail[0]] = 0
 		for i in reversed(range(len(self.snake)-1)):
 			self.snake[i+1] = (self.snake[i][0], self.snake[i][1])
 		self.snake[0] = new_pos
+		if prev_tile == SnakeGame.TILE_FOOD:
+			self.snake.append(snake_tail)
+			self.spawn_food()
 		print(self.snake)
 
 	def apply_move_dir(self, move_dir):
@@ -71,8 +103,13 @@ class MyWindow(arcade.Window):
 		self.fps = 0
 		super().__init__(INITIAL_SCREEN_WIDTH, INITIAL_SCREEN_HEIGHT, SCREEN_TITLE, resizable=True)
 		arcade.set_background_color(arcade.csscolor.CORNFLOWER_BLUE)
+
 		self.snake_game = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
 		self.time_accum: float = 0
+
+		self.manager = arcade.gui.UIManager()
+		self.manager.enable()
+
 	def setup(self):
 		pass
 
@@ -89,11 +126,22 @@ class MyWindow(arcade.Window):
 
 	def on_update(self, delta_time):
 		self.fps = self.fps * 0.9 + 0.1 * (1.0 / (delta_time + (1 / 16384)))
+		if self.snake_game.is_game_over:
+			return
 		self.time_accum += delta_time
 		if self.time_accum >= PLAYER_SNAKE_STEP_DELAY:
 			self.time_accum = 0
 			self.snake_game.step()
-		pass
+			if self.snake_game.is_game_over:
+				self.time_accum = 0
+				restart_button = arcade.gui.UIFlatButton(text="Play Again?", x=self.width/2-100, y=self.height/2, width=200, height=50)
+				restart_button.on_click = self.on_restart
+				self.manager.add(restart_button)
+	
+	def on_restart(self, event):
+		self.time_accum = 0
+		self.snake_game = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
+		self.manager.clear()
 
 	def on_draw(self):
 		self.clear()
@@ -118,11 +166,15 @@ class MyWindow(arcade.Window):
 					color = (233, 30, 54)
 				arcade.draw_lrtb_rectangle_filled(x_start, x_start+PIXELS_PER_BOARD_TILE, y_start+PIXELS_PER_BOARD_TILE, y_start, color)
 				board_color_idx = (board_color_idx + 1) % len(board_colors)
-		arcade.draw_text("FPS: {}".format(self.fps), 0, 0, (0,0,0))
+		
+		self.manager.draw()
+		
+		arcade.draw_text("FPS: {}".format(self.fps), start_x=0, start_y=0, color=(0,0,0), font_size=16)
+		arcade.draw_text("Score: {}".format(len(self.snake_game.snake)), start_x=0, start_y=INITIAL_SCREEN_HEIGHT-24, color=(0,0,0), font_size=16)
 
 def main():
 	window = MyWindow()
-	if (INITIAL_SCREEN_WIDTH < BOARD_WIDTH * PIXELS_PER_BOARD_TILE or INITIAL_SCREEN_HEIGHT < BOARD_WIDTH * PIXELS_PER_BOARD_TILE):
+	if (INITIAL_SCREEN_WIDTH < BOARD_WIDTH * PIXELS_PER_BOARD_TILE or INITIAL_SCREEN_HEIGHT < BOARD_HEIGHT * PIXELS_PER_BOARD_TILE):
 		print("WARNING: screen width and screen height should be at least {} and {} respectively to fill the whole board".format(BOARD_WIDTH * PIXELS_PER_BOARD_TILE, BOARD_HEIGHT * PIXELS_PER_BOARD_TILE))
 	window.setup()
 	arcade.run()
