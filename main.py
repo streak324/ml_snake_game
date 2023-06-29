@@ -2,13 +2,14 @@ import arcade
 import arcade.gui
 import numpy
 import random
+import torch.nn
 
 INITIAL_SCREEN_WIDTH = 1280
 INITIAL_SCREEN_HEIGHT = 720
 SCREEN_TITLE = "Snake"
-PIXELS_PER_BOARD_TILE = 32
-BOARD_WIDTH = 24
-BOARD_HEIGHT = 16
+PIXELS_PER_BOARD_TILE = 16
+BOARD_WIDTH = 32
+BOARD_HEIGHT = 24
 INITIAL_SNAKE_LENGTH = 3
 
 PLAYER_CONTROLLED = True
@@ -25,6 +26,8 @@ class SnakeGame:
 	TILE_EMPTY = 0
 	TILE_SNAKE = 1
 	TILE_FOOD = 2
+
+	FOOD_COUNTDOWN_DELAY = 10 # seconds
 
 	def __init__(self, board_width: int, board_height: int):
 		self.snake_tentative_move_dir = SnakeGame.MOVE_LEFT
@@ -49,15 +52,26 @@ class SnakeGame:
 					continue
 				if self.board[i][j] == SnakeGame.TILE_EMPTY:
 					score = random.random()
+
+					snake_head = self.snake[0]
+					if (self.snake_move_dir == SnakeGame.MOVE_UP and j == self.snake[0] and i > snake_head[1]) or (self.snake_move_dir == SnakeGame.MOVE_LEFT and i == self.snake[1] and j < snake_head[0]) or (self.snake_move_dir == SnakeGame.MOVE_DOWN and j == self.snake[0] and i < snake_head[1]) or (self.snake_move_dir == SnakeGame.MOVE_RIGHT and i == self.snake[1] and j > snake_head[0]):
+						score = score * 0.5
+
 					if score > best_score:
 						found = True
 						pos = (j, i)
 						best_score = score
 		if found:
 			self.board[pos[1]][pos[0]] = SnakeGame.TILE_FOOD
+		self.food_countdown = SnakeGame.FOOD_COUNTDOWN_DELAY
 
 
-	def step(self):
+	def step(self, time_step):
+		self.food_countdown -= time_step
+		if self.food_countdown < 0:
+			self.food_countdown = 0
+			print("waited too long to get food!")
+			self.is_game_over = True
 		if self.is_game_over:
 			return
 		if SnakeGame.OPPOSITE_MOVE_DIRS[self.snake_tentative_move_dir] != self.snake_move_dir:
@@ -93,7 +107,6 @@ class SnakeGame:
 		if prev_tile == SnakeGame.TILE_FOOD:
 			self.snake.append(snake_tail)
 			self.spawn_food()
-		print(self.snake)
 
 	def apply_move_dir(self, move_dir):
 		self.snake_tentative_move_dir = move_dir
@@ -109,6 +122,20 @@ class MyWindow(arcade.Window):
 
 		self.manager = arcade.gui.UIManager()
 		self.manager.enable()
+		self.spritelist = arcade.SpriteList(capacity= 2*BOARD_WIDTH*BOARD_HEIGHT)
+		self.spritelist.initialize()
+		board_colors = [(170, 213, 80), (158, 204, 69)]
+		board_color_idx = 0
+		board_x_start = (self.width - BOARD_WIDTH * PIXELS_PER_BOARD_TILE) * 0.5
+		board_y_start = (self.height - BOARD_HEIGHT * PIXELS_PER_BOARD_TILE) * 0.5
+		for i in range(BOARD_HEIGHT):
+			board_color_idx = (board_color_idx + 1) % len(board_colors)
+			for j in range(BOARD_WIDTH):
+				sprite = arcade.SpriteSolidColor(width=PIXELS_PER_BOARD_TILE, height=PIXELS_PER_BOARD_TILE, color = board_colors[board_color_idx])
+				sprite.center_x = board_x_start + j*PIXELS_PER_BOARD_TILE+PIXELS_PER_BOARD_TILE/2
+				sprite.center_y = board_y_start + i*PIXELS_PER_BOARD_TILE+PIXELS_PER_BOARD_TILE/2
+				self.spritelist.append(sprite)
+				board_color_idx = (board_color_idx + 1) % len(board_colors)
 
 	def setup(self):
 		pass
@@ -131,7 +158,7 @@ class MyWindow(arcade.Window):
 		self.time_accum += delta_time
 		if self.time_accum >= PLAYER_SNAKE_STEP_DELAY:
 			self.time_accum = 0
-			self.snake_game.step()
+			self.snake_game.step(PLAYER_SNAKE_STEP_DELAY)
 			if self.snake_game.is_game_over:
 				self.time_accum = 0
 				restart_button = arcade.gui.UIFlatButton(text="Play Again?", x=self.width/2-100, y=self.height/2, width=200, height=50)
@@ -143,37 +170,44 @@ class MyWindow(arcade.Window):
 		self.snake_game = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
 		self.manager.clear()
 
+	def on_resize(self, width, height):
+		for i in range(BOARD_HEIGHT):
+			for j in range(BOARD_WIDTH):
+				sprite = self.spritelist[i*BOARD_WIDTH + j]
+				sprite.center_x = (self.width - BOARD_WIDTH * PIXELS_PER_BOARD_TILE) * 0.5 + j*PIXELS_PER_BOARD_TILE+PIXELS_PER_BOARD_TILE/2
+				sprite.center_y = (self.height - BOARD_HEIGHT * PIXELS_PER_BOARD_TILE) * 0.5 + i*PIXELS_PER_BOARD_TILE+PIXELS_PER_BOARD_TILE/2
+		super().on_resize(width, height)
+
 	def on_draw(self):
 		self.clear()
 		# center the board in the window
-		board_x_start = 0
-		board_y_start = 0
 		board_x_start = (self.width - BOARD_WIDTH * PIXELS_PER_BOARD_TILE) * 0.5
 		board_y_start = (self.height - BOARD_HEIGHT * PIXELS_PER_BOARD_TILE) * 0.5
-		board_colors = [(170, 213, 80), (158, 204, 69)]
-		board_color_idx = 0
+
+		self.spritelist.draw()
 		for j in range(BOARD_HEIGHT):
-			board_color_idx = (board_color_idx + 1) % len(board_colors)
 			for i in range(BOARD_WIDTH):
 				x_start = board_x_start + i*PIXELS_PER_BOARD_TILE
 				y_start = board_y_start + j*PIXELS_PER_BOARD_TILE
-				color = board_colors[board_color_idx]
+				color = (0,0,0)
 				if i == self.snake_game.snake[0][0] and j == self.snake_game.snake[0][1]:
 					color = (104, 0, 182)
 				elif self.snake_game.board[j][i] == SnakeGame.TILE_SNAKE:
 					color = (0, 0, 0)
 				elif self.snake_game.board[j][i] == SnakeGame.TILE_FOOD:
 					color = (233, 30, 54)
+				else:
+					continue
 				arcade.draw_lrtb_rectangle_filled(x_start, x_start+PIXELS_PER_BOARD_TILE, y_start+PIXELS_PER_BOARD_TILE, y_start, color)
-				board_color_idx = (board_color_idx + 1) % len(board_colors)
-		
 		self.manager.draw()
 		
 		arcade.draw_text("FPS: {}".format(self.fps), start_x=0, start_y=0, color=(0,0,0), font_size=16)
-		arcade.draw_text("Score: {}".format(len(self.snake_game.snake)), start_x=0, start_y=INITIAL_SCREEN_HEIGHT-24, color=(0,0,0), font_size=16)
+		arcade.draw_text("Score: {}".format(len(self.snake_game.snake)), start_x=0, start_y=self.height-24, color=(0,0,0), font_size=16)
+		arcade.draw_text("Countdown: {}".format(self.snake_game.food_countdown), start_x=0, start_y=self.height-40, color=(0,0,0), font_size=16)
 
 def main():
 	window = MyWindow()
+	window.set_update_rate(1/100)
 	if (INITIAL_SCREEN_WIDTH < BOARD_WIDTH * PIXELS_PER_BOARD_TILE or INITIAL_SCREEN_HEIGHT < BOARD_HEIGHT * PIXELS_PER_BOARD_TILE):
 		print("WARNING: screen width and screen height should be at least {} and {} respectively to fill the whole board".format(BOARD_WIDTH * PIXELS_PER_BOARD_TILE, BOARD_HEIGHT * PIXELS_PER_BOARD_TILE))
 	window.setup()
