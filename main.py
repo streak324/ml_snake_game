@@ -17,6 +17,8 @@ USER_INPUT_CONTROLLED = False
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
 COMPUTER_CONTROLLED = True
 
+NUM_GAMES = 100
+
 class SnakeNeuralNet(nn.Module):
 	def __init__(self):
 		super().__init__()
@@ -53,7 +55,7 @@ class SnakeGame:
 		self.board_height = board_height
 		self.board = numpy.zeros([board_height, board_width], dtype=numpy.int8)
 		self.snake = []
-		self.time_step = 0
+		self.steps = 0
 		self.is_game_over = False
 		for i in range(INITIAL_SNAKE_LENGTH):
 			self.snake.append((int(board_width - INITIAL_SNAKE_LENGTH - 1 + i), int(board_height/2)))
@@ -87,13 +89,14 @@ class SnakeGame:
 
 
 	def step(self):
+		if self.is_game_over:
+			return True
+
 		self.food_countdown -= 1
 		if self.food_countdown < 0:
 			self.food_countdown = 0
 			print("waited too long to get food!")
 			self.is_game_over = True
-			return True
-		if self.is_game_over:
 			return True
 		if SnakeGame.OPPOSITE_MOVE_DIRS[self.snake_tentative_move_dir] != self.snake_move_dir:
 			self.snake_move_dir = self.snake_tentative_move_dir
@@ -130,7 +133,7 @@ class SnakeGame:
 			(self.food_pos, self.food_spawned) = self.spawn_food()
 		if self.food_spawned == False:
 			self.food_pos = self.snake[0]
-		self.time_step += 1
+		self.steps += 1
 		return False
 
 	def apply_move_dir(self, move_dir):
@@ -143,11 +146,15 @@ class MyWindow(arcade.Window):
 		arcade.set_background_color(arcade.csscolor.CORNFLOWER_BLUE)
 
 		self.neuralnet = SnakeNeuralNet()
-		self.snake_game = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
+		self.snake_games = []
+		self.game_view_idx = 0
+		for i in range(NUM_GAMES):
+			self.snake_games.append(SnakeGame(BOARD_WIDTH, BOARD_HEIGHT))
 		self.time_accum: float = 0
 
 		self.manager = arcade.gui.UIManager()
 		self.manager.enable()
+		self.is_retry_button_shown = False
 		self.spritelist = arcade.SpriteList(capacity= 2*BOARD_WIDTH*BOARD_HEIGHT)
 		self.spritelist.initialize()
 		board_colors = [(170, 213, 80), (158, 204, 69)]
@@ -169,46 +176,60 @@ class MyWindow(arcade.Window):
 	def on_key_press(self, key: int, modifiers: int):
 		if USER_INPUT_CONTROLLED:
 			if key == arcade.key.UP:
-				self.snake_game.apply_move_dir(SnakeGame.MOVE_UP)
+				self.snake_games[self.game_view_idx].apply_move_dir(SnakeGame.MOVE_UP)
 			if key == arcade.key.LEFT:
-				self.snake_game.apply_move_dir(SnakeGame.MOVE_LEFT)
+				self.snake_games[self.game_view_idx].apply_move_dir(SnakeGame.MOVE_LEFT)
 			if key == arcade.key.DOWN:
-				self.snake_game.apply_move_dir(SnakeGame.MOVE_DOWN)
+				self.snake_games[self.game_view_idx].apply_move_dir(SnakeGame.MOVE_DOWN)
 			if key == arcade.key.RIGHT:
-				self.snake_game.apply_move_dir(SnakeGame.MOVE_RIGHT)
+				self.snake_games[self.game_view_idx].apply_move_dir(SnakeGame.MOVE_RIGHT)
+		else:
+			if key == arcade.key.LEFT:
+				self.game_view_idx = (self.game_view_idx - 1) % len(self.snake_games)
+			if key == arcade.key.RIGHT:
+				self.game_view_idx = (self.game_view_idx + 1) % len(self.snake_games)
+			if key == arcade.key.H:
+				view_idx = 0
+				best_score = 0
+				for i, game in enumerate(self.snake_games):
+					if calc_score(game) > best_score:
+						view_idx = i
+						best_score = calc_score(game)
+				print(best_score)
+				self.game_view_idx = view_idx
 
 	def on_update(self, delta_time):
 		self.fps = self.fps * 0.9 + 0.1 * (1.0 / (delta_time + (1 / 16384)))
-		if self.snake_game.is_game_over:
-			return
 		self.time_accum += delta_time
 		if self.time_accum >= USER_SNAKE_STEP_DELAY:
 			self.time_accum = 0
 
 			if COMPUTER_CONTROLLED:
-				delta_pos = torch.tensor([[self.snake_game.food_pos[0] - self.snake_game.snake[0][0], self.snake_game.food_pos[1] - self.snake_game.snake[0][1]]]).float()
-				nn_out = self.neuralnet(delta_pos)
-				print("{}".format(nn_out))
+				dpos_matrix = torch.zeros((len(self.snake_games), 2)).float()
+				for i, game in enumerate(self.snake_games):
+					dpos_matrix[i] = torch.tensor([[game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1]]]).float()
+				nn_out = self.neuralnet(dpos_matrix)
+
+			for i, game in enumerate(self.snake_games):
 				best_score = 0
 				move = 0
-				for i in range(4):
-					if nn_out[0][i] > best_score: 
-						move = i
-						best_score = nn_out[0][i]
-				self.snake_game.apply_move_dir(move)
-			game_over = self.snake_game.step()
-			if game_over:
-				self.time_accum = 0
-				if USER_INPUT_CONTROLLED:
-					restart_button = arcade.gui.UIFlatButton(text="Play Again?", x=self.width/2-100, y=100, width=200, height=50)
-					restart_button.on_click = self.on_restart
-					self.manager.add(restart_button)
-				else:
-					self.snake_game = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
+				for j in range(4):
+					if nn_out[i][j] > best_score: 
+						move = j
+						best_score = nn_out[i][j]
+				game.apply_move_dir(move)
+				game_over = game.step()
+				if game_over:
+					if USER_INPUT_CONTROLLED and self.is_retry_button_shown == False:
+						restart_button = arcade.gui.UIFlatButton(text="Play Again?", x=self.width/2-100, y=100, width=200, height=50)
+						restart_button.on_click = self.on_restart
+						self.is_retry_button_shown = True
+						self.manager.add(restart_button)
 	
 	def on_restart(self, event):
 		self.time_accum = 0
-		self.snake_game = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
+		self.snake_games[self.game_view_idx] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
+		self.is_retry_button_shown = False
 		self.manager.clear()
 
 	def on_resize(self, width, height):
@@ -231,11 +252,11 @@ class MyWindow(arcade.Window):
 				x_start = board_x_start + i*PIXELS_PER_BOARD_TILE
 				y_start = board_y_start + j*PIXELS_PER_BOARD_TILE
 				color = (0,0,0)
-				if i == self.snake_game.snake[0][0] and j == self.snake_game.snake[0][1]:
+				if i == self.snake_games[self.game_view_idx].snake[0][0] and j == self.snake_games[self.game_view_idx].snake[0][1]:
 					color = (104, 0, 182)
-				elif self.snake_game.board[j][i] == SnakeGame.TILE_SNAKE:
+				elif self.snake_games[self.game_view_idx].board[j][i] == SnakeGame.TILE_SNAKE:
 					color = (0, 0, 0)
-				elif self.snake_game.board[j][i] == SnakeGame.TILE_FOOD:
+				elif self.snake_games[self.game_view_idx].board[j][i] == SnakeGame.TILE_FOOD:
 					color = (233, 30, 54)
 				else:
 					continue
@@ -243,9 +264,13 @@ class MyWindow(arcade.Window):
 		self.manager.draw()
 		
 		arcade.draw_text("FPS: {}".format(self.fps), start_x=0, start_y=0, color=(0,0,0), font_size=16)
-		arcade.draw_text("Score: {}".format(len(self.snake_game.snake)), start_x=0, start_y=self.height-24, color=(0,0,0), font_size=16)
-		arcade.draw_text("Hunger Countdown: {}".format(self.snake_game.food_countdown), start_x=0, start_y=self.height-48, color=(0,0,0), font_size=16)
-		arcade.draw_text("Time Step: {}".format(self.snake_game.time_step), start_x=0, start_y=self.height-72, color=(0,0,0), font_size=16)
+		arcade.draw_text("Score: {}".format(len(self.snake_games[self.game_view_idx].snake)), start_x=0, start_y=self.height-24, color=(0,0,0), font_size=16)
+		arcade.draw_text("Hunger Countdown: {}".format(self.snake_games[self.game_view_idx].food_countdown), start_x=0, start_y=self.height-48, color=(0,0,0), font_size=16)
+		arcade.draw_text("Time Step: {}".format(self.snake_games[self.game_view_idx].steps), start_x=0, start_y=self.height-72, color=(0,0,0), font_size=16)
+		arcade.draw_text("Snake Game: {}".format(self.game_view_idx), start_x=0, start_y=self.height-96, color=(0,0,0), font_size=16)
+
+def calc_score(game: SnakeGame):
+	return game.steps + len(game.snake)*(game.board_width + game.board_height) - (abs(game.food_pos[0] - game.snake[0][0]) + game.food_pos[1] - game.snake[0][1])
 
 def main():
 	window = MyWindow()
