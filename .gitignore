@@ -1,1 +1,4 @@
 .vscode
+*.pth
+data
+.ipynb_checkpoints
