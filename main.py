@@ -35,10 +35,10 @@ class SnakeNeuralNet(nn.Module):
 class SnakeGame:
 	MOVE_UP = 0
 	MOVE_LEFT = 1
-	MOVE_RIGHT = 2
-	MOVE_DOWN = 3
+	MOVE_DOWN = 2
+	MOVE_RIGHT = 3
 
-	OPPOSITE_MOVE_DIRS = (MOVE_DOWN, MOVE_RIGHT, MOVE_LEFT, MOVE_UP)
+	OPPOSITE_MOVE_DIRS = (MOVE_DOWN, MOVE_RIGHT, MOVE_UP, MOVE_LEFT)
 
 	TILE_EMPTY = 0
 	TILE_SNAKE = 1
@@ -114,7 +114,7 @@ class SnakeGame:
 			self.is_game_over = True
 			return True
 		if self.board[new_pos[1]][new_pos[0]] == SnakeGame.TILE_SNAKE:
-			print("snake hit self")
+			print("snake hit self new_pos: {}, snake: {}".format(new_pos, self.snake))
 			self.is_game_over = True
 			return True
 		
