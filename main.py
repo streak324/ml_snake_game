@@ -216,9 +216,12 @@ class MyWindow(arcade.Window):
 	def on_update(self, delta_time):
 		self.fps = self.fps * 0.9 + 0.1 * (1.0 / (delta_time + (1 / 16384)))
 		self.time_accum += delta_time
-		if self.time_accum >= USER_SNAKE_STEP_DELAY:
+		apply_step = COMPUTER_CONTROLLED
+		if apply_step and self.time_accum >= USER_SNAKE_STEP_DELAY:
 			self.time_accum = 0
+			apply_step = True
 
+		if apply_step:
 			start = time.time()
 			elapsed_step_time = 0
 			if COMPUTER_CONTROLLED:
