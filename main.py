@@ -14,9 +14,9 @@ BOARD_WIDTH = 32
 BOARD_HEIGHT = 24
 INITIAL_SNAKE_LENGTH = 3
 
-USER_INPUT_CONTROLLED = False
+USER_INPUT_CONTROLLED = True
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
-COMPUTER_CONTROLLED = True
+COMPUTER_CONTROLLED = False
 
 NUM_GAMES = 1
 
@@ -137,6 +137,39 @@ class SnakeGame:
 	def apply_move_dir(self, move_dir):
 		self.snake_tentative_move_dir = move_dir
 
+	def get_obstacle_directions(self):
+		left_dist = 0
+		right_dist = 0 
+		down_dist = 0
+		up_dist = 0
+		for l in range(1, self.snake[0][0]+1):
+			x = self.snake[0][0] - l
+			if l < 0:
+				break
+			tile = self.board[self.snake[0][1]][x]
+			if tile != SnakeGame.TILE_EMPTY and tile != SnakeGame.TILE_FOOD:
+				break
+			left_dist = l
+		for x in range(self.snake[0][0]+1, self.board_width):
+			tile = self.board[self.snake[0][1]][x]
+			if tile != SnakeGame.TILE_EMPTY and tile != SnakeGame.TILE_FOOD:
+				break
+			right_dist = x - self.snake[0][0]
+		for d in range(1, self.snake[0][1]+1):
+			y = self.snake[0][1] - d
+			if d < 0:
+				break
+			tile = self.board[y][self.snake[0][0]]
+			if tile != SnakeGame.TILE_EMPTY and tile != SnakeGame.TILE_FOOD:
+				break
+			down_dist = d
+		for y in range(self.snake[0][1]+1, self.board_height):
+			tile = self.board[y][self.snake[0][0]]
+			if tile != SnakeGame.TILE_EMPTY and tile != SnakeGame.TILE_FOOD:
+				break
+			up_dist = y - self.snake[0][1]
+		return (up_dist, left_dist, down_dist, right_dist)
+
 class MyWindow(arcade.Window):
 	def __init__(self):
 		self.fps = 0
@@ -218,71 +251,42 @@ class MyWindow(arcade.Window):
 		self.fps = self.fps * 0.9 + 0.1 * (1.0 / (delta_time + (1 / 16384)))
 		self.time_accum += delta_time
 		apply_step = COMPUTER_CONTROLLED
-		if apply_step and self.time_accum >= USER_SNAKE_STEP_DELAY:
+		if apply_step == False and self.time_accum >= USER_SNAKE_STEP_DELAY:
 			self.time_accum = 0
 			apply_step = True
 
 		if apply_step:
 			start = time.time()
-			elapsed_step_time = 0
 			if COMPUTER_CONTROLLED:
 				input_matrix = torch.zeros((len(self.snake_games), 6)).float()
 				for i, game in enumerate(self.snake_games):
 					inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], 0, 0, 0, 0]).float()
+					obstacle_directions = game.get_obstacle_directions()
 					input_move_offset = 2
-					for l in range(1, game.snake[0][0]+1):
-						x = game.snake[0][0] - l
-						if l < 0:
-							break
-						tile = game.board[game.snake[0][1]][x]
-						if tile == SnakeGame.TILE_EMPTY or tile == SnakeGame.TILE_FOOD:
-							break
-						inputs[SnakeGame.MOVE_LEFT + input_move_offset] = l
-					for x in range(game.snake[0][0]+1, game.board_width-1):
-						tile = game.board[game.snake[0][1]][x]
-						if tile == SnakeGame.TILE_EMPTY or tile == SnakeGame.TILE_FOOD:
-							break
-						inputs[SnakeGame.MOVE_RIGHT + input_move_offset] = (game.board_width-1) - x
-					for d in range(1, game.snake[0][1]+1):
-						y = game.snake[0][1] - d
-						if d < 0:
-							break
-						tile = game.board[y][game.snake[0][0]]
-						if tile == SnakeGame.TILE_EMPTY or tile == SnakeGame.TILE_FOOD:
-							break
-						inputs[SnakeGame.MOVE_DOWN + input_move_offset] = l
-					for y in range(game.snake[0][1]+1, game.board_height-1):
-						tile = game.board[y][game.snake[0][0]]
-						if tile == SnakeGame.TILE_EMPTY or tile == SnakeGame.TILE_FOOD:
-							break
-						inputs[SnakeGame.MOVE_RIGHT + input_move_offset] = (game.board_height-1) - y
+					for j in range(4):
+						inputs[j+input_move_offset] = obstacle_directions[j]
 					input_matrix[i] = inputs
 					print(input_matrix)
 				nn_out = self.neuralnet(input_matrix)
+				#probability distribution function
+				pdf = torch.distributions.Categorical(nn_out)
 
-			#probability distribution function
-			pdf = torch.distributions.Categorical(nn_out)
-
-			explore_actions = pdf.sample()
-			actions = explore_actions.clone()
-			print(actions)
-			for i in range(len(actions)):
-				# only do do exploring 10% of the time
-				if random.random() > 0.1:
-					actions[i] = max(nn_out[i])
-			rewards = torch.zeros(len(self.snake_games))
-			for i, game in enumerate(self.snake_games):
-				start_step_time = time.time()
+				explore_actions = pdf.sample()
+				actions = explore_actions.clone()
+				print(actions)
+				for i in range(len(actions)):
+					# only do do exploring 10% of the time
+					if random.random() > 0.1:
+						actions[i] = max(nn_out[i])
+				rewards = torch.zeros(len(self.snake_games))
 				game.apply_move_dir(actions[i])
-				game_over = game.step()
-				elapsed_step_time += time.time() - start_step_time
-				rewards[i] = calc_score(game)
-				loss = (-pdf.log_prob(actions) * rewards).sum()/len(actions)
-				self.optimizer.step()
-				self.optimizer.zero_grad()
+			for i, game in enumerate(self.snake_games):
+				is_game_over = game.step()
 				self.max_snake_length = max(self.max_snake_length, len(game.snake))
 				self.max_steps = max(game.steps, self.max_steps)
-				if game_over:
+				if COMPUTER_CONTROLLED:
+					rewards[i] = calc_score(game)
+				if is_game_over:
 					if USER_INPUT_CONTROLLED and self.is_retry_button_shown == False:
 						restart_button = arcade.gui.UIFlatButton(text="Play Again?", x=self.width/2-100, y=100, width=200, height=50)
 						restart_button.on_click = self.on_restart
@@ -290,7 +294,12 @@ class MyWindow(arcade.Window):
 						self.manager.add(restart_button)
 					if COMPUTER_CONTROLLED:
 						self.snake_games[i] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
-			print("elapsed time: {}. elapsed step time: {}. loss: {}.".format(time.time() - start, elapsed_step_time, loss))
+			if COMPUTER_CONTROLLED:
+				rewards[i] = calc_score(game)
+				loss = (-pdf.log_prob(actions) * rewards).sum()/len(actions)
+				self.optimizer.step()
+				self.optimizer.zero_grad()
+				print("elapsed time: {}.loss: {}.".format(time.time() - start, loss))
 	
 	def on_restart(self, event):
 		self.time_accum = 0
@@ -327,6 +336,26 @@ class MyWindow(arcade.Window):
 				else:
 					continue
 				arcade.draw_lrtb_rectangle_filled(x_start, x_start+PIXELS_PER_BOARD_TILE, y_start+PIXELS_PER_BOARD_TILE, y_start, color)
+		obstacle_directions = self.snake_games[self.game_view_idx].get_obstacle_directions()
+		print(obstacle_directions)
+		head_x = self.snake_games[self.game_view_idx].snake[0][0]
+		head_y = self.snake_games[self.game_view_idx].snake[0][1]
+		for j in range(1,obstacle_directions[SnakeGame.MOVE_UP]+1):
+			x = board_x_start + head_x * PIXELS_PER_BOARD_TILE
+			y = board_y_start + (head_y + j) * PIXELS_PER_BOARD_TILE
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
+		for j in range(1,obstacle_directions[SnakeGame.MOVE_LEFT]+1):
+			x = board_x_start + (head_x - j) * PIXELS_PER_BOARD_TILE
+			y = board_y_start + head_y * PIXELS_PER_BOARD_TILE
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
+		for j in range(1,obstacle_directions[SnakeGame.MOVE_DOWN]+1):
+			x = board_x_start + head_x * PIXELS_PER_BOARD_TILE
+			y = board_y_start + (head_y - j) * PIXELS_PER_BOARD_TILE
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
+		for j in range(1,obstacle_directions[SnakeGame.MOVE_RIGHT]+1):
+			x = board_x_start + (head_x + j) * PIXELS_PER_BOARD_TILE
+			y = board_y_start + head_y * PIXELS_PER_BOARD_TILE
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
 		self.manager.draw()
 		
 		arcade.draw_text("FPS: {}".format(self.fps), start_x=0, start_y=0, color=(0,0,0), font_size=16)
