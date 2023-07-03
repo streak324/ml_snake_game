@@ -14,9 +14,9 @@ BOARD_WIDTH = 32
 BOARD_HEIGHT = 24
 INITIAL_SNAKE_LENGTH = 3
 
-USER_INPUT_CONTROLLED = True
+USER_INPUT_CONTROLLED = False
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
-COMPUTER_CONTROLLED = False
+COMPUTER_CONTROLLED = True
 
 NUM_GAMES = 1
 
@@ -266,14 +266,12 @@ class MyWindow(arcade.Window):
 					for j in range(4):
 						inputs[j+input_move_offset] = obstacle_directions[j]
 					input_matrix[i] = inputs
-					print(input_matrix)
 				nn_out = self.neuralnet(input_matrix)
 				#probability distribution function
 				pdf = torch.distributions.Categorical(nn_out)
 
 				explore_actions = pdf.sample()
 				actions = explore_actions.clone()
-				print(actions)
 				for i in range(len(actions)):
 					# only do do exploring 10% of the time
 					if random.random() > 0.1:
@@ -337,7 +335,6 @@ class MyWindow(arcade.Window):
 					continue
 				arcade.draw_lrtb_rectangle_filled(x_start, x_start+PIXELS_PER_BOARD_TILE, y_start+PIXELS_PER_BOARD_TILE, y_start, color)
 		obstacle_directions = self.snake_games[self.game_view_idx].get_obstacle_directions()
-		print(obstacle_directions)
 		head_x = self.snake_games[self.game_view_idx].snake[0][0]
 		head_y = self.snake_games[self.game_view_idx].snake[0][1]
 		obstacle_directions_color = (128, 0, 128, 64)
