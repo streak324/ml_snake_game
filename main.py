@@ -270,12 +270,7 @@ class MyWindow(arcade.Window):
 				#probability distribution function
 				pdf = torch.distributions.Categorical(nn_out)
 
-				explore_actions = pdf.sample()
-				actions = explore_actions.clone()
-				for i in range(len(actions)):
-					# only do do exploring 10% of the time
-					if random.random() > 0.1:
-						actions[i] = max(nn_out[i])
+				actions = pdf.sample()
 				rewards = torch.zeros(len(self.snake_games))
 				game.apply_move_dir(actions[i])
 			for i, game in enumerate(self.snake_games):
@@ -293,11 +288,10 @@ class MyWindow(arcade.Window):
 					if COMPUTER_CONTROLLED:
 						self.snake_games[i] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
 			if COMPUTER_CONTROLLED:
-				rewards[i] = calc_score(game)
 				loss = (-pdf.log_prob(actions) * rewards).sum()/len(actions)
 				self.optimizer.step()
 				self.optimizer.zero_grad()
-				print("elapsed time: {}.loss: {}.".format(time.time() - start, loss))
+				print("elapsed time: {}. loss: {}.".format(time.time() - start, loss))
 	
 	def on_restart(self, event):
 		self.time_accum = 0
@@ -365,19 +359,13 @@ class MyWindow(arcade.Window):
 		arcade.draw_text("Max Snake Length: {}".format(self.max_snake_length), start_x=0, start_y=self.height-144, color=(0,0,0), font_size=16)
 
 def calc_score(game: SnakeGame):
-	return 1
-	#if game.is_game_over:
-	#	return -(game.board_width + game.board_height)
-	#current_dist = abs(game.food_pos[0] - game.snake[0][0]) + abs(game.food_pos[1] - game.snake[0][1])
-	#prev_dist = abs(game.food_pos[0] - game.snake[1][0]) + abs(game.food_pos[1] - game.snake[1][1])
-	#return -(prev_dist - current_dist)
-	#current_dist = abs(game.food_pos[0] - game.snake[0][0]) + abs(game.food_pos[1] - game.snake[0][1])
-	#prev_dist = abs(game.food_pos[0] - game.snake[1][0]) + abs(game.food_pos[1] - game.snake[1][1])
-	#if game.ate_food == True:
-	#	return 5
-	#elif prev_dist < current_dist:
-	#	return 2
-	#return 1
+	if game.is_game_over:
+		return -2*(game.board_width + game.board_height)
+	if game.ate_food:
+		return game.board_width + game.board_height
+	current_dist = abs(game.food_pos[0] - game.snake[0][0]) + abs(game.food_pos[1] - game.snake[0][1])
+	prev_dist = abs(game.food_pos[0] - game.snake[1][0]) + abs(game.food_pos[1] - game.snake[1][1])
+	return -(current_dist - prev_dist)
 
 def main():
 	window = MyWindow()
