@@ -340,22 +340,23 @@ class MyWindow(arcade.Window):
 		print(obstacle_directions)
 		head_x = self.snake_games[self.game_view_idx].snake[0][0]
 		head_y = self.snake_games[self.game_view_idx].snake[0][1]
+		obstacle_directions_color = (128, 0, 128, 64)
 		for j in range(1,obstacle_directions[SnakeGame.MOVE_UP]+1):
 			x = board_x_start + head_x * PIXELS_PER_BOARD_TILE
 			y = board_y_start + (head_y + j) * PIXELS_PER_BOARD_TILE
-			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, obstacle_directions_color)
 		for j in range(1,obstacle_directions[SnakeGame.MOVE_LEFT]+1):
 			x = board_x_start + (head_x - j) * PIXELS_PER_BOARD_TILE
 			y = board_y_start + head_y * PIXELS_PER_BOARD_TILE
-			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, obstacle_directions_color)
 		for j in range(1,obstacle_directions[SnakeGame.MOVE_DOWN]+1):
 			x = board_x_start + head_x * PIXELS_PER_BOARD_TILE
 			y = board_y_start + (head_y - j) * PIXELS_PER_BOARD_TILE
-			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, obstacle_directions_color)
 		for j in range(1,obstacle_directions[SnakeGame.MOVE_RIGHT]+1):
 			x = board_x_start + (head_x + j) * PIXELS_PER_BOARD_TILE
 			y = board_y_start + head_y * PIXELS_PER_BOARD_TILE
-			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, arcade.csscolor.PURPLE)
+			arcade.draw_lrtb_rectangle_filled(x, x+PIXELS_PER_BOARD_TILE, y+PIXELS_PER_BOARD_TILE, y, obstacle_directions_color)
 		self.manager.draw()
 		
 		arcade.draw_text("FPS: {}".format(self.fps), start_x=0, start_y=0, color=(0,0,0), font_size=16)
