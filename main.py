@@ -280,18 +280,16 @@ class MyWindow(arcade.Window):
 						inputs[j+input_move_offset] = obstacle_directions[j]
 					input_matrix[i] = inputs
 				nn_out = self.neuralnet(input_matrix)
-				actions = torch.max(nn_out, 1)[1]
-				print("actions: {}".format(actions))
+				#actions = torch.max(nn_out, 1)[1]
 				#probability distribution function
 				pdf = torch.distributions.Categorical(nn_out)
-				#explore_actions = pdf.sample()
+				actions = pdf.sample()
 				#actions = explore_actions.clone()
 				#for aidx, _ in enumerate(actions):
 				#	if random.random() > 0.25:
 				#		actions[aidx] = nn_out[aidx].max()
 				rewards = torch.zeros(len(self.snake_games))
 			for i, game in enumerate(self.snake_games):
-				print("action: {}".format(actions[i]))
 				game.apply_move_dir(actions[i])
 				is_game_over = game.step()
 				self.max_snake_length = max(self.max_snake_length, len(game.snake))
