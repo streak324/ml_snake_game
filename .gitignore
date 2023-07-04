@@ -2,3 +2,4 @@
 *.pth
 data
 .ipynb_checkpoints
+*_steps_progress.json

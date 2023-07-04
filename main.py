@@ -5,6 +5,8 @@ import random
 from torch import nn
 import torch
 import time
+import json
+import os
 
 INITIAL_SCREEN_WIDTH = 1280
 INITIAL_SCREEN_HEIGHT = 720
@@ -19,6 +21,8 @@ USER_SNAKE_STEP_DELAY = 0.1 # seconds
 COMPUTER_CONTROLLED = True
 
 NUM_GAMES = 1
+
+SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
 
 class SnakeNeuralNet(nn.Module):
 	def __init__(self):
@@ -189,6 +193,9 @@ class MyWindow(arcade.Window):
 		arcade.set_background_color(arcade.csscolor.CORNFLOWER_BLUE)
 
 		self.neuralnet = SnakeNeuralNet()
+		if os.path.isfile(SNAKE_MODEL_FILEPATH):
+			self.neuralnet.load_state_dict(torch.load(SNAKE_MODEL_FILEPATH))
+			self.neuralnet.eval()
 		self.optimizer = torch.optim.SGD(self.neuralnet.parameters(), lr=1e-3)
 		self.snake_games = []
 		self.game_view_idx = 0
@@ -208,6 +215,13 @@ class MyWindow(arcade.Window):
 
 		self.are_steps_manual = False
 		self.apply_manual_step = True
+
+		self.num_restarts = 0
+		self.steps_accum = 0
+
+
+		snake_steps_progress_filepath = "./{}_steps_progress.json".format(time.time_ns()/1_000_000_000)
+		self.steps_progress_file = open(snake_steps_progress_filepath, 'w', encoding="utf-8")
 
 		for i in range(BOARD_HEIGHT):
 			board_color_idx = (board_color_idx + 1) % len(board_colors)
@@ -304,6 +318,18 @@ class MyWindow(arcade.Window):
 						self.manager.add(restart_button)
 					if COMPUTER_CONTROLLED:
 						self.snake_games[i] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
+						self.num_restarts += 1
+						self.steps_accum += game.steps
+						avg_steps = 0
+						if self.num_restarts % (NUM_GAMES * 10) == 0:
+							avg_steps = self.steps_accum / (NUM_GAMES * 10)
+							self.steps_accum = 0
+							data = {"steps": avg_steps, "restart":self.num_restarts}
+							json.dump(data, self.steps_progress_file)
+							self.steps_progress_file.write('\n')
+							self.steps_progress_file.flush()
+						if self.num_restarts % (NUM_GAMES * 100) == 0:
+							torch.save(self.neuralnet.state_dict(), SNAKE_MODEL_FILEPATH)
 			if COMPUTER_CONTROLLED:
 				loss = (-pdf.log_prob(actions) * rewards).sum()
 				loss.backward()
@@ -375,6 +401,7 @@ class MyWindow(arcade.Window):
 		arcade.draw_text("Snake Game: {}".format(self.game_view_idx), start_x=0, start_y=self.height-96, color=(0,0,0), font_size=16)
 		arcade.draw_text("Max Steps: {}".format(self.max_steps), start_x=0, start_y=self.height-120, color=(0,0,0), font_size=16)
 		arcade.draw_text("Max Snake Length: {}".format(self.max_snake_length), start_x=0, start_y=self.height-144, color=(0,0,0), font_size=16)
+		arcade.draw_text("Restarts: {}".format(self.num_restarts), start_x=0, start_y=self.height-168, color=(0,0,0), font_size=16)
 
 def calc_score(game: SnakeGame):
 	if game.is_game_over:
