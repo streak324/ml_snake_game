@@ -25,7 +25,11 @@ class SnakeNeuralNet(nn.Module):
 		super().__init__()
 		self.flatten = nn.Flatten()
 		self.linear_relu_stack = nn.Sequential(
-			nn.Linear(6, 8),
+			nn.Linear(7, 8),
+			nn.ReLU(),
+			nn.Linear(8, 8),
+			nn.ReLU(),
+			nn.Linear(8, 8),
 			nn.ReLU(),
 			nn.Linear(8, 4),
 			nn.Softmax(dim=1)
@@ -201,6 +205,10 @@ class MyWindow(arcade.Window):
 		board_color_idx = 0
 		board_x_start = (self.width - BOARD_WIDTH * PIXELS_PER_BOARD_TILE) * 0.5
 		board_y_start = (self.height - BOARD_HEIGHT * PIXELS_PER_BOARD_TILE) * 0.5
+
+		self.are_steps_manual = False
+		self.apply_manual_step = True
+
 		for i in range(BOARD_HEIGHT):
 			board_color_idx = (board_color_idx + 1) % len(board_colors)
 			for j in range(BOARD_WIDTH):
@@ -246,34 +254,45 @@ class MyWindow(arcade.Window):
 					if game.is_game_over == False:
 						self.game_view_idx = i
 						break
+			if key == arcade.key.S:
+				self.are_steps_manual = not self.are_steps_manual
+			if key == arcade.key.SPACE and self.are_steps_manual:
+				self.apply_manual_step = True
 
 	def on_update(self, delta_time):
 		self.fps = self.fps * 0.9 + 0.1 * (1.0 / (delta_time + (1 / 16384)))
 		self.time_accum += delta_time
-		apply_step = COMPUTER_CONTROLLED
-		if apply_step == False and self.time_accum >= USER_SNAKE_STEP_DELAY:
+		apply_step = COMPUTER_CONTROLLED and (self.are_steps_manual == False or self.apply_manual_step)
+		if COMPUTER_CONTROLLED == False and self.time_accum >= USER_SNAKE_STEP_DELAY:
 			self.time_accum = 0
 			apply_step = True
 
 		if apply_step:
 			start = time.time()
 			if COMPUTER_CONTROLLED:
-				input_matrix = torch.zeros((len(self.snake_games), 6)).float()
+				self.apply_manual_step = False
+				input_matrix = torch.zeros((len(self.snake_games), 7)).float()
 				for i, game in enumerate(self.snake_games):
-					inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], 0, 0, 0, 0]).float()
+					inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], game.snake_move_dir, 0, 0, 0, 0]).float()
 					obstacle_directions = game.get_obstacle_directions()
-					input_move_offset = 2
+					input_move_offset = 3
 					for j in range(4):
 						inputs[j+input_move_offset] = obstacle_directions[j]
 					input_matrix[i] = inputs
 				nn_out = self.neuralnet(input_matrix)
+				actions = torch.max(nn_out, 1)[1]
+				print("actions: {}".format(actions))
 				#probability distribution function
 				pdf = torch.distributions.Categorical(nn_out)
-
-				actions = pdf.sample()
+				#explore_actions = pdf.sample()
+				#actions = explore_actions.clone()
+				#for aidx, _ in enumerate(actions):
+				#	if random.random() > 0.25:
+				#		actions[aidx] = nn_out[aidx].max()
 				rewards = torch.zeros(len(self.snake_games))
-				game.apply_move_dir(actions[i])
 			for i, game in enumerate(self.snake_games):
+				print("action: {}".format(actions[i]))
+				game.apply_move_dir(actions[i])
 				is_game_over = game.step()
 				self.max_snake_length = max(self.max_snake_length, len(game.snake))
 				self.max_steps = max(game.steps, self.max_steps)
@@ -288,10 +307,11 @@ class MyWindow(arcade.Window):
 					if COMPUTER_CONTROLLED:
 						self.snake_games[i] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
 			if COMPUTER_CONTROLLED:
-				loss = (-pdf.log_prob(actions) * rewards).sum()/len(actions)
+				loss = (-pdf.log_prob(actions) * rewards).sum()
+				loss.backward()
 				self.optimizer.step()
 				self.optimizer.zero_grad()
-				print("elapsed time: {}. loss: {}.".format(time.time() - start, loss))
+				print("possible actions: {}, chosen actions: {}. rewards: {}".format(nn_out, actions, rewards))
 	
 	def on_restart(self, event):
 		self.time_accum = 0
@@ -360,9 +380,9 @@ class MyWindow(arcade.Window):
 
 def calc_score(game: SnakeGame):
 	if game.is_game_over:
-		return -2*(game.board_width + game.board_height)
+		return -10
 	if game.ate_food:
-		return game.board_width + game.board_height
+		return 10
 	current_dist = abs(game.food_pos[0] - game.snake[0][0]) + abs(game.food_pos[1] - game.snake[0][1])
 	prev_dist = abs(game.food_pos[0] - game.snake[1][0]) + abs(game.food_pos[1] - game.snake[1][1])
 	return -(current_dist - prev_dist)
