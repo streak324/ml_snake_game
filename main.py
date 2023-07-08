@@ -16,15 +16,14 @@ BOARD_WIDTH = 32
 BOARD_HEIGHT = 24
 INITIAL_SNAKE_LENGTH = 3
 
-USER_INPUT_CONTROLLED = False
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
-COMPUTER_CONTROLLED = True
-
-NUM_GAMES = 1
 
 SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
 
-HEADLESS = True
+NUM_GAMES = 100
+USER_INPUT_CONTROLLED = False
+COMPUTER_CONTROLLED = True
+HEADLESS = False
 
 class SnakeNeuralNet(nn.Module):
 	def __init__(self):
@@ -191,6 +190,7 @@ class AgentSim:
 		)
 		self.neuralnet = SnakeNeuralNet()
 		if os.path.isfile(SNAKE_MODEL_FILEPATH):
+			print("LOADING SNAKE MODEL")
 			self.neuralnet.load_state_dict(torch.load(SNAKE_MODEL_FILEPATH))
 			self.neuralnet.eval()
 		self.optimizer = torch.optim.SGD(self.neuralnet.parameters(), lr=1e-3)
@@ -203,7 +203,7 @@ class AgentSim:
 		self.max_snake_length = 0
 		self.num_restarts = 0
 		self.steps_accum = 0
-		snake_steps_progress_filepath = "./data/progress/{}_steps_progress.json".format(time.time_ns()/1_000_000_000)
+		snake_steps_progress_filepath = "./data/progress/{}_steps_progress.json".format(time.time_ns()//1_000_000_000)
 		self.steps_progress_file = open(snake_steps_progress_filepath, 'w', encoding="utf-8")
 		self.max_steps = 0
 		self.max_snake_length = 0
@@ -258,12 +258,12 @@ class AgentSim:
 					if self.num_restarts % (NUM_GAMES * 100) == 0:
 						torch.save(self.neuralnet.state_dict(), SNAKE_MODEL_FILEPATH)
 		if COMPUTER_CONTROLLED:
-			loss = (-pdf.log_prob(actions) * rewards).sum()
+			loss = (-pdf.log_prob(actions) * rewards).mean()
 			loss.backward()
 			self.optimizer.step()
 			self.optimizer.zero_grad()
 			if HEADLESS == False:
-				print("possible actions: {}, chosen actions: {}. rewards: {}".format(nn_out, actions, rewards))
+				print("possible actions: {}. chosen actions: {}. rewards: {}".format(nn_out, actions, rewards))
 		return False
 
 class MyWindow(arcade.Window):
@@ -332,7 +332,7 @@ class MyWindow(arcade.Window):
 				for i, game in enumerate(self.agent.snake_games):
 					if calc_score(game) > best_score:
 						view_idx = i
-						best_score = calc_score(game)
+						best_score = game.steps
 				print(best_score)
 				self.game_view_idx = view_idx
 			if key == arcade.key.N:
