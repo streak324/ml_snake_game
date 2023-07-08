@@ -20,7 +20,9 @@ USER_SNAKE_STEP_DELAY = 0.1 # seconds
 
 SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
 
-NUM_GAMES = 100
+NUM_GAMES = 1
+ALLOW_SAVING_MODEL = False
+ALLOW_LEARNING = False
 USER_INPUT_CONTROLLED = False
 COMPUTER_CONTROLLED = True
 HEADLESS = False
@@ -30,7 +32,7 @@ class SnakeNeuralNet(nn.Module):
 		super().__init__()
 		self.flatten = nn.Flatten()
 		self.linear_relu_stack = nn.Sequential(
-			nn.Linear(7, 8),
+			nn.Linear(8, 8),
 			nn.ReLU(),
 			nn.Linear(8, 8),
 			nn.ReLU(),
@@ -203,19 +205,21 @@ class AgentSim:
 		self.max_snake_length = 0
 		self.num_restarts = 0
 		self.steps_accum = 0
-		snake_steps_progress_filepath = "./data/progress/{}_steps_progress.json".format(time.time_ns()//1_000_000_000)
-		self.steps_progress_file = open(snake_steps_progress_filepath, 'w', encoding="utf-8")
+		self.snake_len_accum = 0
+		if ALLOW_LEARNING:
+		    snake_steps_progress_filepath = "./data/progress/{}_steps_progress.json".format(time.time_ns()//1_000_000_000)
+		    self.steps_progress_file = open(snake_steps_progress_filepath, 'w', encoding="utf-8")
 		self.max_steps = 0
 		self.max_snake_length = 0
 
 	def update(self):
 		if COMPUTER_CONTROLLED:
 			self.apply_manual_step = False
-			input_matrix = torch.zeros((len(self.snake_games), 7)).float()
+			input_matrix = torch.zeros((len(self.snake_games), 8)).float()
 			for i, game in enumerate(self.snake_games):
-				inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], game.snake_move_dir, 0, 0, 0, 0]).float()
+				inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], game.snake_move_dir, SnakeGame.OPPOSITE_MOVE_DIRS[game.snake_move_dir], 0, 0, 0, 0]).float()
 				obstacle_directions = game.get_obstacle_directions()
-				input_move_offset = 3
+				input_move_offset = 4
 				for j in range(4):
 					inputs[j+input_move_offset] = obstacle_directions[j]
 				input_matrix[i] = inputs
@@ -241,27 +245,30 @@ class AgentSim:
 				if USER_INPUT_CONTROLLED:
 					return True
 				if COMPUTER_CONTROLLED:
-					self.snake_games[i] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
 					self.num_restarts += 1
 					self.steps_accum += game.steps
-					avg_steps = 0
-					if self.num_restarts % (NUM_GAMES * 10) == 0:
+					self.snake_len_accum += len(game.snake)
+					self.snake_games[i] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
+					if self.num_restarts % (NUM_GAMES * 10) == 0 and ALLOW_LEARNING:
 						print("restarts: {}. accumulated steps: {}. elapsed time: {}. best episode: (steps: {}, snake size: {})".
 	    					format(self.num_restarts, self.steps_accum, time.time() - self.last_report, self.max_steps, self.max_snake_length))
 						self.last_report = time.time()
 						avg_steps = self.steps_accum / (NUM_GAMES * 10)
 						self.steps_accum = 0
-						data = {"steps": avg_steps, "restart":self.num_restarts}
+						avg_snake_len = self.snake_len_accum / (NUM_GAMES * 10)
+						self.snake_len_accum = 0
+						data = {"avg_steps": avg_steps, "avg_snake_len": avg_snake_len, "restart":self.num_restarts}
 						json.dump(data, self.steps_progress_file)
 						self.steps_progress_file.write('\n')
 						self.steps_progress_file.flush()
-					if self.num_restarts % (NUM_GAMES * 100) == 0:
+					if self.num_restarts % (NUM_GAMES * 100) == 0 and ALLOW_SAVING_MODEL and ALLOW_LEARNING:
 						torch.save(self.neuralnet.state_dict(), SNAKE_MODEL_FILEPATH)
 		if COMPUTER_CONTROLLED:
-			loss = (-pdf.log_prob(actions) * rewards).mean()
-			loss.backward()
-			self.optimizer.step()
-			self.optimizer.zero_grad()
+			if ALLOW_LEARNING:
+				loss = (-pdf.log_prob(actions) * rewards).mean()
+				loss.backward()
+				self.optimizer.step()
+				self.optimizer.zero_grad()
 			if HEADLESS == False:
 				print("possible actions: {}. chosen actions: {}. rewards: {}".format(nn_out, actions, rewards))
 		return False
@@ -330,7 +337,7 @@ class MyWindow(arcade.Window):
 				view_idx = 0
 				best_score = 0
 				for i, game in enumerate(self.agent.snake_games):
-					if calc_score(game) > best_score:
+					if game.steps > best_score:
 						view_idx = i
 						best_score = game.steps
 				print(best_score)
