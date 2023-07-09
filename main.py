@@ -18,18 +18,18 @@ INITIAL_SNAKE_LENGTH = 3
 
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
 
-SNAKE_MODEL_FILEPATH = "./snakemodel_1.pth"
+SNAKE_MODEL_FILEPATH = "./snakemodel_2.pth"
 
-NUM_GAMES = 100
+NUM_GAMES = 50
 # how many samples until we update the policy/neural network. 1 sample is NUM_GAME steps
-SAMPLES_PER_LEARN = 2
+SAMPLES_PER_GAME = 10
 RESTARTS_PER_REPORT = 1_000
 RESTARTS_PER_SAVE = 10_000
 ALLOW_SAVING_MODEL = True
 ALLOW_LEARNING = True
 USER_INPUT_CONTROLLED = False
 COMPUTER_CONTROLLED = True
-HEADLESS = True
+HEADLESS = False
 DEBUG_ACTIONS = False
 
 class SnakeNeuralNet(nn.Module):
@@ -214,7 +214,8 @@ class AgentSim:
 		self.max_steps = 0
 		self.max_score = 0
 		self.num_restarts = 0
-		self.losses = torch.zeros(size = (SAMPLES_PER_LEARN, NUM_GAMES))
+		self.log_probs = torch.zeros(SAMPLES_PER_GAME * NUM_GAMES)
+		self.rewards = torch.zeros(NUM_GAMES)
 		self.steps_report_accum = 0
 		self.score_report_accum = 0
 
@@ -248,6 +249,7 @@ class AgentSim:
 			self.max_steps = max(game.steps, self.max_steps)
 			if COMPUTER_CONTROLLED:
 				rewards[i] = calc_reward(game)
+				self.rewards[i] += rewards[i]
 			if DEBUG_ACTIONS:
 				print("possible actions: {}. chosen actions: {}. rewards: {}".format(nn_out, actions, rewards))
 			if is_game_over:
@@ -278,12 +280,15 @@ class AgentSim:
 						self.max_init_snake_len = max(INITIAL_SNAKE_LENGTH, int(min(avg_score,  BOARD_WIDTH)))
 						self.min_init_snake_len = max(INITIAL_SNAKE_LENGTH, self.max_init_snake_len/2)
 		if ALLOW_LEARNING:
-			sample_idx = self.samples_counter % SAMPLES_PER_LEARN
-			loss = (-pdf.log_prob(actions) * rewards).mean()
+			sample_idx = self.samples_counter % SAMPLES_PER_GAME
+			self.log_probs[sample_idx*NUM_GAMES : (sample_idx+1)*NUM_GAMES] = pdf.log_prob(actions) * rewards
 			self.samples_counter += 1
-			loss.backward()
-			self.optimizer.step()
-			self.optimizer.zero_grad()
+			if self.samples_counter % SAMPLES_PER_GAME == 0: 
+				loss = (-self.log_probs).mean()
+				self.log_probs = torch.zeros(SAMPLES_PER_GAME * NUM_GAMES)
+				loss.backward()
+				self.optimizer.step()
+				self.optimizer.zero_grad()
 		return False
 
 class MyWindow(arcade.Window):
