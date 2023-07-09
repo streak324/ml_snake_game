@@ -18,14 +18,19 @@ INITIAL_SNAKE_LENGTH = 3
 
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
 
-SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
+SNAKE_MODEL_FILEPATH = "./snakemodel_1.pth"
 
-NUM_GAMES = 1
-ALLOW_SAVING_MODEL = False
-ALLOW_LEARNING = False
+NUM_GAMES = 100
+# how many samples until we update the policy/neural network. 1 sample is NUM_GAME steps
+SAMPLES_PER_LEARN = 2
+RESTARTS_PER_REPORT = 1_000
+RESTARTS_PER_SAVE = 10_000
+ALLOW_SAVING_MODEL = True
+ALLOW_LEARNING = True
 USER_INPUT_CONTROLLED = False
 COMPUTER_CONTROLLED = True
-HEADLESS = False
+HEADLESS = True
+DEBUG_ACTIONS = False
 
 class SnakeNeuralNet(nn.Module):
 	def __init__(self):
@@ -60,7 +65,7 @@ class SnakeGame:
 
 	FOOD_COUNTDOWN_DELAY = 120 # steps since food was last eaten before game is over
 
-	def __init__(self, board_width: int, board_height: int):
+	def __init__(self, board_width: int, board_height: int, min_len: int = INITIAL_SNAKE_LENGTH, max_len: int = INITIAL_SNAKE_LENGTH):
 		self.snake_tentative_move_dir = SnakeGame.MOVE_LEFT
 		self.snake_move_dir = SnakeGame.MOVE_LEFT
 		self.board_width = board_width
@@ -69,14 +74,16 @@ class SnakeGame:
 		self.snake = []
 		self.steps = 0
 		self.is_game_over = False
+		# number of eaten food
+		self.score = 0
 		self.ate_food = False
-		for i in range(INITIAL_SNAKE_LENGTH):
+		size = random.randint(min_len, max_len)
+		for i in range(size):
 			self.snake.append((int(board_width - INITIAL_SNAKE_LENGTH - 1 + i), int(board_height/2)))
 			self.board[self.snake[i][1]][self.snake[i][0]] = SnakeGame.TILE_SNAKE
 		(self.food_pos, self.food_spawned) = self.spawn_food()
 
 	def spawn_food(self):
-		best_score = -1
 		found = False
 		pos = (0,0)
 		for i in range(10):
@@ -139,6 +146,7 @@ class SnakeGame:
 		if prev_tile == SnakeGame.TILE_FOOD:
 			self.snake.append(snake_tail)
 			self.ate_food = True
+			self.score += 1
 			(self.food_pos, self.food_spawned) = self.spawn_food()
 		if self.food_spawned == False:
 			self.food_pos = self.snake[0]
@@ -190,6 +198,8 @@ class AgentSim:
 			if torch.backends.mps.is_available()
 			else "cpu"
 		)
+		self.min_init_snake_len = INITIAL_SNAKE_LENGTH
+		self.max_init_snake_len = INITIAL_SNAKE_LENGTH
 		self.neuralnet = SnakeNeuralNet()
 		if os.path.isfile(SNAKE_MODEL_FILEPATH):
 			print("LOADING SNAKE MODEL")
@@ -198,19 +208,22 @@ class AgentSim:
 		self.optimizer = torch.optim.SGD(self.neuralnet.parameters(), lr=1e-3)
 		self.snake_games = []
 		for i in range(NUM_GAMES):
-			self.snake_games.append(SnakeGame(BOARD_WIDTH, BOARD_HEIGHT))
+			self.snake_games.append(SnakeGame(board_width=BOARD_WIDTH, board_height=BOARD_HEIGHT, min_len=self.min_init_snake_len, max_len=self.max_init_snake_len))
 		self.start = time.time()
 		self.last_report = time.time()
 		self.max_steps = 0
-		self.max_snake_length = 0
+		self.max_score = 0
 		self.num_restarts = 0
-		self.steps_accum = 0
-		self.snake_len_accum = 0
+		self.losses = torch.zeros(size = (SAMPLES_PER_LEARN, NUM_GAMES))
+		self.steps_report_accum = 0
+		self.score_report_accum = 0
+
+		self.samples_counter = 0
 		if ALLOW_LEARNING:
-		    snake_steps_progress_filepath = "./data/progress/{}_steps_progress.json".format(time.time_ns()//1_000_000_000)
-		    self.steps_progress_file = open(snake_steps_progress_filepath, 'w', encoding="utf-8")
+			snake_steps_progress_filepath = "./data/progress/{}_steps_progress.json".format(time.time_ns()//1_000_000_000)
+			self.steps_progress_file = open(snake_steps_progress_filepath, 'w', encoding="utf-8")
 		self.max_steps = 0
-		self.max_snake_length = 0
+		self.max_score = 0
 
 	def update(self):
 		if COMPUTER_CONTROLLED:
@@ -224,53 +237,53 @@ class AgentSim:
 					inputs[j+input_move_offset] = obstacle_directions[j]
 				input_matrix[i] = inputs
 			nn_out = self.neuralnet(input_matrix)
-			#actions = torch.max(nn_out, 1)[1]
-			#probability distribution function
 			pdf = torch.distributions.Categorical(nn_out)
 			actions = pdf.sample()
-			#actions = explore_actions.clone()
-			#for aidx, _ in enumerate(actions):
-			#	if random.random() > 0.25:
-			#		actions[aidx] = nn_out[aidx].max()
 			rewards = torch.zeros(len(self.snake_games))
 		for i, game in enumerate(self.snake_games):
 			if COMPUTER_CONTROLLED:
 				game.apply_move_dir(actions[i])
 			is_game_over = game.step()
-			self.max_snake_length = max(self.max_snake_length, len(game.snake))
+			self.max_score = max(self.max_score, game.score)
 			self.max_steps = max(game.steps, self.max_steps)
 			if COMPUTER_CONTROLLED:
-				rewards[i] = calc_score(game)
+				rewards[i] = calc_reward(game)
+			if DEBUG_ACTIONS:
+				print("possible actions: {}. chosen actions: {}. rewards: {}".format(nn_out, actions, rewards))
 			if is_game_over:
 				if USER_INPUT_CONTROLLED:
 					return True
 				if COMPUTER_CONTROLLED:
 					self.num_restarts += 1
-					self.steps_accum += game.steps
-					self.snake_len_accum += len(game.snake)
+					self.steps_report_accum += game.steps
+					self.score_report_accum += game.score
 					self.snake_games[i] = SnakeGame(BOARD_WIDTH, BOARD_HEIGHT)
-					if self.num_restarts % (NUM_GAMES * 10) == 0 and ALLOW_LEARNING:
-						print("restarts: {}. accumulated steps: {}. elapsed time: {}. best episode: (steps: {}, snake size: {})".
-	    					format(self.num_restarts, self.steps_accum, time.time() - self.last_report, self.max_steps, self.max_snake_length))
+
+					if self.num_restarts % RESTARTS_PER_SAVE == 0 and ALLOW_SAVING_MODEL and ALLOW_LEARNING:
+						torch.save(self.neuralnet.state_dict(), SNAKE_MODEL_FILEPATH)
+
+					if self.num_restarts % RESTARTS_PER_REPORT == 0 and ALLOW_LEARNING:
+						print("restarts: {}. accumulated steps: {}. elapsed time: {}. best episode: (steps: {}, score: {})".
+						format(self.num_restarts, self.steps_report_accum, time.time() - self.last_report, self.max_steps, self.max_score))
 						self.last_report = time.time()
-						avg_steps = self.steps_accum / (NUM_GAMES * 10)
-						self.steps_accum = 0
-						avg_snake_len = self.snake_len_accum / (NUM_GAMES * 10)
-						self.snake_len_accum = 0
-						data = {"avg_steps": avg_steps, "avg_snake_len": avg_snake_len, "restart":self.num_restarts}
+						avg_steps = self.steps_report_accum / (NUM_GAMES * 10)
+						self.steps_report_accum = 0
+						avg_score = self.score_report_accum / (NUM_GAMES * 10)
+						self.score_report_accum = 0
+						data = {"avg_steps": avg_steps, "avg_score": avg_score, "restart": self.num_restarts}
 						json.dump(data, self.steps_progress_file)
 						self.steps_progress_file.write('\n')
 						self.steps_progress_file.flush()
-					if self.num_restarts % (NUM_GAMES * 100) == 0 and ALLOW_SAVING_MODEL and ALLOW_LEARNING:
-						torch.save(self.neuralnet.state_dict(), SNAKE_MODEL_FILEPATH)
-		if COMPUTER_CONTROLLED:
-			if ALLOW_LEARNING:
-				loss = (-pdf.log_prob(actions) * rewards).mean()
-				loss.backward()
-				self.optimizer.step()
-				self.optimizer.zero_grad()
-			if HEADLESS == False:
-				print("possible actions: {}. chosen actions: {}. rewards: {}".format(nn_out, actions, rewards))
+
+						self.max_init_snake_len = max(INITIAL_SNAKE_LENGTH, int(min(avg_score,  BOARD_WIDTH)))
+						self.min_init_snake_len = max(INITIAL_SNAKE_LENGTH, self.max_init_snake_len/2)
+		if ALLOW_LEARNING:
+			sample_idx = self.samples_counter % SAMPLES_PER_LEARN
+			loss = (-pdf.log_prob(actions) * rewards).mean()
+			self.samples_counter += 1
+			loss.backward()
+			self.optimizer.step()
+			self.optimizer.zero_grad()
 		return False
 
 class MyWindow(arcade.Window):
@@ -430,15 +443,15 @@ class MyWindow(arcade.Window):
 		self.manager.draw()
 		
 		arcade.draw_text("FPS: {}".format(self.fps), start_x=0, start_y=0, color=(0,0,0), font_size=16)
-		arcade.draw_text("Score: {}".format(len(self.agent.snake_games[self.game_view_idx].snake)), start_x=0, start_y=self.height-24, color=(0,0,0), font_size=16)
+		arcade.draw_text("Score: {}".format(self.agent.snake_games[self.game_view_idx].score), start_x=0, start_y=self.height-24, color=(0,0,0), font_size=16)
 		arcade.draw_text("Hunger Countdown: {}".format(self.agent.snake_games[self.game_view_idx].food_countdown), start_x=0, start_y=self.height-48, color=(0,0,0), font_size=16)
 		arcade.draw_text("Time Step: {}".format(self.agent.snake_games[self.game_view_idx].steps), start_x=0, start_y=self.height-72, color=(0,0,0), font_size=16)
 		arcade.draw_text("Snake Game: {}".format(self.game_view_idx), start_x=0, start_y=self.height-96, color=(0,0,0), font_size=16)
 		arcade.draw_text("Max Steps: {}".format(self.agent.max_steps), start_x=0, start_y=self.height-120, color=(0,0,0), font_size=16)
-		arcade.draw_text("Max Snake Length: {}".format(self.agent.max_snake_length), start_x=0, start_y=self.height-144, color=(0,0,0), font_size=16)
+		arcade.draw_text("Max Score: {}".format(self.agent.max_score), start_x=0, start_y=self.height-144, color=(0,0,0), font_size=16)
 		arcade.draw_text("Restarts: {}".format(self.agent.num_restarts), start_x=0, start_y=self.height-168, color=(0,0,0), font_size=16)
 
-def calc_score(game: SnakeGame):
+def calc_reward(game: SnakeGame):
 	if game.is_game_over:
 		return -10
 	if game.ate_food:
