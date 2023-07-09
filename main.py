@@ -18,11 +18,11 @@ INITIAL_SNAKE_LENGTH = 3
 
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
 
-SNAKE_MODEL_FILEPATH = "./snakemodel_5.pth"
+SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
 
 NUM_GAMES = 100
 # how many samples per game we should collect until we update the policy/neural network.
-SAMPLES_PER_GAME = 1
+SAMPLES_PER_GAME = 10
 RESTARTS_PER_REPORT = 1_000
 RESTARTS_PER_SAVE = 10_000
 ALLOW_SAVING_MODEL = True
@@ -33,19 +33,21 @@ HEADLESS = True
 DEBUG_ACTIONS = False
 
 class SnakeNeuralNet(nn.Module):
-	def __init__(self):
+	def __init__(self, device):
 		super().__init__()
-		self.flatten = nn.Flatten()
+		self.flatten = nn.Flatten().to(device)
 		self.linear_relu_stack = nn.Sequential(
-			nn.Linear(8, 8),
+			nn.Linear(BOARD_WIDTH * BOARD_HEIGHT, 32),
 			nn.ReLU(),
-			nn.Linear(8, 8),
+			nn.Linear(32, 32),
 			nn.ReLU(),
-			nn.Linear(8, 8),
+			nn.Linear(32, 32),
 			nn.ReLU(),
-			nn.Linear(8, 4),
+			nn.Linear(32, 32),
+			nn.ReLU(),
+			nn.Linear(32, 4),
 			nn.Softmax(dim=1)
-		)
+		).to(device)
 	def forward(self, x):
 		x = self.flatten(x)
 		logits = self.linear_relu_stack(x)
@@ -192,20 +194,22 @@ class SnakeGame:
 class AgentSim:
 	def __init__(self, headless=False):
 		self.device = (
-			"cuda"
-			if torch.cuda.is_available()
-			else "mps"
-			if torch.backends.mps.is_available()
-			else "cpu"
+			#"cuda"
+			#if torch.cuda.is_available()
+			#else "mps"
+			#if torch.backends.mps.is_available()
+			#else "cpu"
+			"cpu"
 		)
+		print("using device:", self.device)
 		self.min_init_snake_len = INITIAL_SNAKE_LENGTH
 		self.max_init_snake_len = INITIAL_SNAKE_LENGTH
-		self.neuralnet = SnakeNeuralNet()
+		self.neuralnet = SnakeNeuralNet(self.device)
 		if os.path.isfile(SNAKE_MODEL_FILEPATH):
 			print("LOADING SNAKE MODEL")
 			self.neuralnet.load_state_dict(torch.load(SNAKE_MODEL_FILEPATH))
 			self.neuralnet.eval()
-		self.optimizer = torch.optim.SGD(self.neuralnet.parameters(), lr=1e-3)
+		self.optimizer = torch.optim.Adam(self.neuralnet.parameters(), lr=1e-4)
 		self.snake_games = []
 		for i in range(NUM_GAMES):
 			self.snake_games.append(SnakeGame(board_width=BOARD_WIDTH, board_height=BOARD_HEIGHT, min_len=self.min_init_snake_len, max_len=self.max_init_snake_len))
@@ -214,8 +218,8 @@ class AgentSim:
 		self.max_steps = 0
 		self.max_score = 0
 		self.num_restarts = 0
-		self.log_probs = torch.zeros(SAMPLES_PER_GAME * NUM_GAMES)
-		self.rewards = torch.zeros(NUM_GAMES)
+		self.log_probs = torch.zeros(SAMPLES_PER_GAME * NUM_GAMES).to(self.device)
+		self.rewards = torch.zeros(NUM_GAMES).to(self.device)
 		self.steps_report_accum = 0
 		self.score_report_accum = 0
 
@@ -229,18 +233,19 @@ class AgentSim:
 	def update(self):
 		if COMPUTER_CONTROLLED:
 			self.apply_manual_step = False
-			input_matrix = torch.zeros((len(self.snake_games), 8)).float()
+			input_matrix = torch.zeros((len(self.snake_games), BOARD_WIDTH * BOARD_HEIGHT)).float().to(self.device)
 			for i, game in enumerate(self.snake_games):
-				inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], game.snake_move_dir, SnakeGame.OPPOSITE_MOVE_DIRS[game.snake_move_dir], 0, 0, 0, 0]).float()
-				obstacle_directions = game.get_obstacle_directions()
-				input_move_offset = 4
-				for j in range(4):
-					inputs[j+input_move_offset] = obstacle_directions[j]
+				inputs = torch.from_numpy(game.board.flatten()).to(self.device)
+			#	inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], game.snake_move_dir, SnakeGame.OPPOSITE_MOVE_DIRS[game.snake_move_dir], 0, 0, 0, 0]).float()
+			#	obstacle_directions = game.get_obstacle_directions()
+			#	input_move_offset = 4
+			#	for j in range(4):
+			#		inputs[j+input_move_offset] = obstacle_directions[j]
 				input_matrix[i] = inputs
 			nn_out = self.neuralnet(input_matrix)
 			pdf = torch.distributions.Categorical(nn_out)
 			actions = pdf.sample()
-			rewards = torch.zeros(len(self.snake_games))
+			rewards = torch.zeros(len(self.snake_games)).to(self.device)
 		for i, game in enumerate(self.snake_games):
 			if COMPUTER_CONTROLLED:
 				game.apply_move_dir(actions[i])
@@ -286,7 +291,7 @@ class AgentSim:
 			self.samples_counter += 1
 			if self.samples_counter % SAMPLES_PER_GAME == 0: 
 				loss = (-self.log_probs).mean()
-				self.log_probs = torch.zeros(SAMPLES_PER_GAME * NUM_GAMES)
+				self.log_probs = torch.zeros(SAMPLES_PER_GAME * NUM_GAMES).to(self.device)
 				loss.backward()
 				self.optimizer.step()
 				self.optimizer.zero_grad()
