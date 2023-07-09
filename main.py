@@ -18,18 +18,18 @@ INITIAL_SNAKE_LENGTH = 3
 
 USER_SNAKE_STEP_DELAY = 0.1 # seconds
 
-SNAKE_MODEL_FILEPATH = "./snakemodel_2.pth"
+SNAKE_MODEL_FILEPATH = "./snakemodel_5.pth"
 
-NUM_GAMES = 50
-# how many samples until we update the policy/neural network. 1 sample is NUM_GAME steps
-SAMPLES_PER_GAME = 10
+NUM_GAMES = 100
+# how many samples per game we should collect until we update the policy/neural network.
+SAMPLES_PER_GAME = 1
 RESTARTS_PER_REPORT = 1_000
 RESTARTS_PER_SAVE = 10_000
 ALLOW_SAVING_MODEL = True
 ALLOW_LEARNING = True
 USER_INPUT_CONTROLLED = False
 COMPUTER_CONTROLLED = True
-HEADLESS = False
+HEADLESS = True
 DEBUG_ACTIONS = False
 
 class SnakeNeuralNet(nn.Module):
@@ -265,14 +265,15 @@ class AgentSim:
 						torch.save(self.neuralnet.state_dict(), SNAKE_MODEL_FILEPATH)
 
 					if self.num_restarts % RESTARTS_PER_REPORT == 0 and ALLOW_LEARNING:
-						print("restarts: {}. accumulated steps: {}. elapsed time: {}. best episode: (steps: {}, score: {})".
-						format(self.num_restarts, self.steps_report_accum, time.time() - self.last_report, self.max_steps, self.max_score))
+						elapsed = time.time() - self.last_report
+						print("restarts: {}. accumulated steps: {}. accumulated score: {}, elapsed time: {}. best episode: (steps: {}, score: {})".
+						format(self.num_restarts, self.steps_report_accum, self.score_report_accum, elapsed, self.max_steps, self.max_score))
 						self.last_report = time.time()
-						avg_steps = self.steps_report_accum / (NUM_GAMES * 10)
+						avg_steps = self.steps_report_accum / RESTARTS_PER_REPORT
 						self.steps_report_accum = 0
-						avg_score = self.score_report_accum / (NUM_GAMES * 10)
+						avg_score = self.score_report_accum / RESTARTS_PER_REPORT
 						self.score_report_accum = 0
-						data = {"avg_steps": avg_steps, "avg_score": avg_score, "restart": self.num_restarts}
+						data = {"avg_steps": avg_steps, "avg_score": avg_score, "restart": self.num_restarts, "time": time.time() - self.start}
 						json.dump(data, self.steps_progress_file)
 						self.steps_progress_file.write('\n')
 						self.steps_progress_file.flush()
@@ -365,7 +366,7 @@ class MyWindow(arcade.Window):
 				for i in  range(len(self.agent.snake_games)-1):
 					idx = (j + i) % len(self.agent.snake_games)
 					if game.is_game_over == False:
-						self.game_view_idx = i
+						self.game_view_idx = idx
 						break
 			if key == arcade.key.S:
 				self.are_steps_manual = not self.are_steps_manual
