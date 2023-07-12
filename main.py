@@ -20,16 +20,16 @@ USER_SNAKE_STEP_DELAY = 0.1 # seconds
 
 SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
 
-NUM_GAMES = 100
+NUM_GAMES = 1
 # how many samples per game we should collect until we update the policy/neural network.
 SAMPLES_PER_GAME = 10
 RESTARTS_PER_REPORT = 1_000
 RESTARTS_PER_SAVE = 10_000
 ALLOW_SAVING_MODEL = True
 ALLOW_LEARNING = True
-USER_INPUT_CONTROLLED = False
-COMPUTER_CONTROLLED = True
-HEADLESS = True
+USER_INPUT_CONTROLLED = True
+COMPUTER_CONTROLLED = False
+HEADLESS = False
 DEBUG_ACTIONS = False
 
 class SnakeNeuralNet(nn.Module):
@@ -62,8 +62,9 @@ class SnakeGame:
 	OPPOSITE_MOVE_DIRS = (MOVE_DOWN, MOVE_RIGHT, MOVE_UP, MOVE_LEFT)
 
 	TILE_EMPTY = 0
-	TILE_SNAKE = 1
-	TILE_FOOD = 2
+	TILE_FOOD = 1
+	TILE_SNAKE = 2
+	TILE_SNAKE_HEAD = 3
 
 	FOOD_COUNTDOWN_DELAY = 120 # steps since food was last eaten before game is over
 
@@ -83,6 +84,7 @@ class SnakeGame:
 		for i in range(size):
 			self.snake.append((int(board_width - INITIAL_SNAKE_LENGTH - 1 + i), int(board_height/2)))
 			self.board[self.snake[i][1]][self.snake[i][0]] = SnakeGame.TILE_SNAKE
+		self.board[self.snake[0][1]][self.snake[0][0]] = SnakeGame.TILE_SNAKE_HEAD
 		(self.food_pos, self.food_spawned) = self.spawn_food()
 
 	def spawn_food(self):
@@ -134,13 +136,15 @@ class SnakeGame:
 		if new_pos[0] >= self.board_width or new_pos[0] < 0 or new_pos[1] >= self.board_height or new_pos[1] < 0:
 			self.is_game_over = True
 			return True
-		if self.board[new_pos[1]][new_pos[0]] == SnakeGame.TILE_SNAKE:
+		if self.board[new_pos[1]][new_pos[0]] == SnakeGame.TILE_SNAKE or self.board[new_pos[1]][new_pos[0]] == SnakeGame.TILE_SNAKE_HEAD:
 			self.is_game_over = True
 			return True
 		
 		prev_tile = self.board[new_pos[1]][new_pos[0]]
 		snake_tail = self.snake[len(self.snake)-1]
-		self.board[new_pos[1]][new_pos[0]] = SnakeGame.TILE_SNAKE
+		snake_head = self.snake[0]
+		self.board[new_pos[1]][new_pos[0]] = SnakeGame.TILE_SNAKE_HEAD
+		self.board[snake_head[1]][snake_head[0]] = SnakeGame.TILE_SNAKE
 		self.board[snake_tail[1]][snake_tail[0]] = 0
 		for i in reversed(range(len(self.snake)-1)):
 			self.snake[i+1] = (self.snake[i][0], self.snake[i][1])
@@ -285,7 +289,7 @@ class AgentSim:
 
 						self.max_init_snake_len = max(INITIAL_SNAKE_LENGTH, int(min(avg_score,  BOARD_WIDTH)))
 						self.min_init_snake_len = max(INITIAL_SNAKE_LENGTH, self.max_init_snake_len/2)
-		if ALLOW_LEARNING:
+		if COMPUTER_CONTROLLED and ALLOW_LEARNING:
 			sample_idx = self.samples_counter % SAMPLES_PER_GAME
 			self.log_probs[sample_idx*NUM_GAMES : (sample_idx+1)*NUM_GAMES] = pdf.log_prob(actions) * rewards
 			self.samples_counter += 1
@@ -422,7 +426,7 @@ class MyWindow(arcade.Window):
 				x_start = board_x_start + i*PIXELS_PER_BOARD_TILE
 				y_start = board_y_start + j*PIXELS_PER_BOARD_TILE
 				color = (0,0,0)
-				if i == self.agent.snake_games[self.game_view_idx].snake[0][0] and j == self.agent.snake_games[self.game_view_idx].snake[0][1]:
+				if self.agent.snake_games[self.game_view_idx].board[j][i] == SnakeGame.TILE_SNAKE_HEAD:
 					color = (104, 0, 182)
 				elif self.agent.snake_games[self.game_view_idx].board[j][i] == SnakeGame.TILE_SNAKE:
 					color = (0, 0, 0)
