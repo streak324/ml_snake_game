@@ -20,16 +20,16 @@ USER_SNAKE_STEP_DELAY = 0.1 # seconds
 
 SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
 
-NUM_GAMES = 1
+NUM_GAMES = 100
 # how many samples per game we should collect until we update the policy/neural network.
 SAMPLES_PER_GAME = 10
 RESTARTS_PER_REPORT = 1_000
 RESTARTS_PER_SAVE = 10_000
 ALLOW_SAVING_MODEL = True
 ALLOW_LEARNING = True
-USER_INPUT_CONTROLLED = True
-COMPUTER_CONTROLLED = False
-HEADLESS = False
+USER_INPUT_CONTROLLED = False
+COMPUTER_CONTROLLED = True
+HEADLESS = True
 DEBUG_ACTIONS = False
 
 class SnakeNeuralNet(nn.Module):
