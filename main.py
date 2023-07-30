@@ -22,7 +22,7 @@ SNAKE_MODEL_FILEPATH = "./snakemodel.pth"
 
 NUM_GAMES = 100
 # how many samples per game we should collect until we update the policy/neural network.
-SAMPLES_PER_GAME = 10
+SAMPLES_PER_GAME = 1
 RESTARTS_PER_REPORT = 1_000
 RESTARTS_PER_SAVE = 10_000
 ALLOW_SAVING_MODEL = True
@@ -37,15 +37,15 @@ class SnakeNeuralNet(nn.Module):
 		super().__init__()
 		self.flatten = nn.Flatten().to(device)
 		self.linear_relu_stack = nn.Sequential(
-			nn.Linear(BOARD_WIDTH * BOARD_HEIGHT, 32),
+			nn.Linear(8, 16),
 			nn.ReLU(),
-			nn.Linear(32, 32),
+			nn.Linear(16, 16),
 			nn.ReLU(),
-			nn.Linear(32, 32),
+			nn.Linear(16, 16),
 			nn.ReLU(),
-			nn.Linear(32, 32),
+			nn.Linear(16, 16),
 			nn.ReLU(),
-			nn.Linear(32, 4),
+			nn.Linear(16, 4),
 			nn.Softmax(dim=1)
 		).to(device)
 	def forward(self, x):
@@ -167,6 +167,7 @@ class SnakeGame:
 		right_dist = 0 
 		down_dist = 0
 		up_dist = 0
+
 		for l in range(1, self.snake[0][0]+1):
 			x = self.snake[0][0] - l
 			if l < 0:
@@ -237,14 +238,15 @@ class AgentSim:
 	def update(self):
 		if COMPUTER_CONTROLLED:
 			self.apply_manual_step = False
-			input_matrix = torch.zeros((len(self.snake_games), BOARD_WIDTH * BOARD_HEIGHT)).float().to(self.device)
+			#input_matrix = torch.zeros((len(self.snake_games), BOARD_WIDTH * BOARD_HEIGHT)).float().to(self.device)
+			input_matrix = torch.zeros((len(self.snake_games), 8)).float()
 			for i, game in enumerate(self.snake_games):
-				inputs = torch.from_numpy(game.board.flatten()).to(self.device)
-			#	inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], game.snake_move_dir, SnakeGame.OPPOSITE_MOVE_DIRS[game.snake_move_dir], 0, 0, 0, 0]).float()
-			#	obstacle_directions = game.get_obstacle_directions()
-			#	input_move_offset = 4
-			#	for j in range(4):
-			#		inputs[j+input_move_offset] = obstacle_directions[j]
+				#inputs = torch.from_numpy(game.board.flatten()).to(self.device)
+				inputs = torch.tensor([game.food_pos[0] - game.snake[0][0], game.food_pos[1] - game.snake[0][1], game.snake_move_dir, SnakeGame.OPPOSITE_MOVE_DIRS[game.snake_move_dir], 0, 0, 0, 0]).float()
+				obstacle_directions = game.get_obstacle_directions()
+				input_move_offset = 4
+				for j in range(4):
+					inputs[j+input_move_offset] = obstacle_directions[j]
 				input_matrix[i] = inputs
 			nn_out = self.neuralnet(input_matrix)
 			pdf = torch.distributions.Categorical(nn_out)
